@@ -1,0 +1,31 @@
+{
+  "name": "udyam-digital",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Project Udyam Digital - digital-first MSME acquisition and onboarding prototype (YTL Hackathon 2026, Track A)",
+  "type": "module",
+  "scripts": {
+    "dev": "concurrently -k -n api,web -c blue,magenta \"node --watch server/index.js\" \"vite\"",
+    "build": "vite build",
+    "start": "node server/index.js",
+    "test": "node --test server/",
+    "ocr:specimens": "node scripts/ocr-specimens.js",
+    "kyc:specimens": "node scripts/kyc-specimens.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^1.3.0",
+    "nodemailer": "^10.3.1",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "tesseract.js": "^7.0.0",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.7.0",
+    "concurrently": "^10.0.6",
+    "vite": "^6.4.5"
+  }
+}
