@@ -87,7 +87,7 @@ async function issueChallenge(type, email, extra = {}) {
     await sendOtpEmail(email, otp, type, OTP_TTL_MS / 60000);
   } catch (e) {
     console.error("OTP email failed:", e.message);
-    throw new AuthError(502, "Couldn't send the email. Check the address and try again.");
+    throw new AuthError(502, "We couldn't send the verification email right now. Please try again in a minute.");
   }
   // One open challenge per email and purpose.
   for (const [id, c] of challenges) if (c.email === email && c.type === type) challenges.delete(id);

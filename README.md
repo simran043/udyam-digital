@@ -46,6 +46,8 @@ Production-style: `npm run build && npm start`, then open http://localhost:8787.
 
 **Email OTP sign-in (required to get past the homepage):** copy `.env.example` to `.env` and set `SMTP_USER` (the Gmail sender) and `SMTP_PASS` (a Gmail **App Password**: Google Account → Security → 2-Step Verification → App passwords). The server loads `.env` on start. First-time users **register** (business name, email, password, retype password, then a code emailed to confirm the address); returning users **sign in** with email + password, then an emailed code. Passwords are stored as salted scrypt hashes in `.data/users.json` (git-ignored; set `USERS_FILE` to move it). Codes expire after 5 minutes, allow 5 attempts and can be re-sent after 30 seconds; 5 wrong passwords lock that email for 15 minutes. Once signed in, the e-sign OTP at checkout is emailed too.
 
+**Hosting on Render (free plan):** Render blocks outbound mail ports on free services, so Gmail SMTP times out there. Set `BREVO_API_KEY` and `MAIL_FROM` (a sender verified in Brevo) instead; the server then sends codes over HTTPS and ignores the SMTP settings. Also note that Render's disk is wiped on redeploy, so `.data/users.json` needs a persistent disk to keep accounts.
+
 **Turn on the Claude advisor (optional):** set `ANTHROPIC_API_KEY` before starting (see `.env.example`). Without it the app runs in guided mode (English + Hindi). Set `ADVISOR_MODE=rules` to force guided mode.
 
 The first KYC upload downloads the English OCR language data (about 10 MB) once, so that step needs internet access.
