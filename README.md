@@ -2,6 +2,10 @@
 
 **Making small businesses go digital in one sitting.** A working prototype for YTL Hackathon 2026, Track A (Project Udyam Digital).
 
+**Live demo:** https://udyam-digital-gox8.onrender.com/
+
+> Hosted on Render's free plan: the first visit after a quiet period can take about a minute while the server wakes up, and accounts reset when the service restarts.
+
 A small business owner chats with **Sahayak**, an advisor that speaks their language. In about 2 minutes they get a bundle with one clear monthly price, finish KYC by photographing documents, sign with an OTP and track installation without calling anyone. A partner console shows sales and channel partners which leads to call next and why.
 
 > Accel Telecom, Accel Business and every business, person and identifier in this repo are fictional (synthetic hackathon data).
