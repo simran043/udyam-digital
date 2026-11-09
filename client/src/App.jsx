@@ -18,7 +18,8 @@ const NAV = [
 ];
 
 export default function App() {
-  const [view, setView] = useState("home");
+  // Signed-in visitors land back on the dashboard after a refresh.
+  const [view, setView] = useState(() => (store.get("udyam.token") ? "advisor" : "home"));
   const [user, setUser] = useState(undefined); // undefined = checking, null = signed out
   const [health, setHealth] = useState(null);
   const [session, setSession] = useState(null);

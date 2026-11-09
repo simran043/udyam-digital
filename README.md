@@ -4,7 +4,7 @@
 
 **Live demo:** https://udyam-digital-gox8.onrender.com/
 
-> Hosted on Render's free plan: the first visit after a quiet period can take about a minute while the server wakes up, and accounts reset when the service restarts.
+> Hosted on Render's free plan: the first visit after a quiet period can take about a minute while the server wakes up, and accounts are stored in MongoDB Atlas so they survive restarts.
 
 A small business owner chats with **Sahayak**, an advisor that speaks their language. In about 2 minutes they get a bundle with one clear monthly price, finish KYC by photographing documents, sign with an OTP and track installation without calling anyone. A partner console shows sales and channel partners which leads to call next and why.
 
@@ -50,7 +50,7 @@ Production-style: `npm run build && npm start`, then open http://localhost:8787.
 
 **Email OTP sign-in (required to get past the homepage):** copy `.env.example` to `.env` and set `SMTP_USER` (the Gmail sender) and `SMTP_PASS` (a Gmail **App Password**: Google Account → Security → 2-Step Verification → App passwords). The server loads `.env` on start. First-time users **register** (business name, email, password, retype password, then a code emailed to confirm the address); returning users **sign in** with email + password, then an emailed code. Passwords are stored as salted scrypt hashes in `.data/users.json` (git-ignored; set `USERS_FILE` to move it). Codes expire after 5 minutes, allow 5 attempts and can be re-sent after 30 seconds; 5 wrong passwords lock that email for 15 minutes. Once signed in, the e-sign OTP at checkout is emailed too.
 
-**Hosting on Render (free plan):** Render blocks outbound mail ports on free services, so Gmail SMTP times out there. Set `BREVO_API_KEY` and `MAIL_FROM` (a sender verified in Brevo) instead; the server then sends codes over HTTPS and ignores the SMTP settings. Also note that Render's disk is wiped on redeploy, so `.data/users.json` needs a persistent disk to keep accounts.
+**Hosting on Render (free plan):** Render blocks outbound mail ports on free services, so Gmail SMTP times out there. Set `BREVO_API_KEY` and `MAIL_FROM` (a sender verified in Brevo) instead; the server then sends codes over HTTPS and ignores the SMTP settings. Render's disk is also wiped on every restart, so set `MONGODB_URI` (a free MongoDB Atlas cluster) to keep accounts, and `SESSION_SECRET` (any long random string) so people stay signed in across restarts.
 
 **Turn on the Claude advisor (optional):** set `ANTHROPIC_API_KEY` before starting (see `.env.example`). Without it the app runs in guided mode (English + Hindi). Set `ADVISOR_MODE=rules` to force guided mode.
 

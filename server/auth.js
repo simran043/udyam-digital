@@ -5,53 +5,35 @@
 //
 // Passwords are hashed with scrypt; codes are stored hashed, expire after
 // 5 minutes, allow 5 attempts and can be re-sent after 30 seconds.
-// Accounts are saved to a JSON file (USERS_FILE, default ./.data/users.json)
-// so they survive restarts; codes and sessions live in memory.
+// Accounts live in userStore.js (MongoDB or a local JSON file).
+//
+// Session tokens are signed with SESSION_SECRET, so they stay valid when the
+// server restarts. Without SESSION_SECRET a random secret is used and everyone
+// is signed out on restart.
 import crypto from "node:crypto";
-import fs from "node:fs";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { mailConfigured, sendOtpEmail } from "./mailer.js";
+import { userStore, DuplicateUserError } from "./userStore.js";
 
 const OTP_TTL_MS = 5 * 60 * 1000;
 const RESEND_MS = 30 * 1000;
 const MAX_OTP_ATTEMPTS = 5;
-const SESSION_TTL_MS = 12 * 60 * 60 * 1000;
+const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const MAX_LOGIN_FAILURES = 5;
 const LOCK_MS = 15 * 60 * 1000;
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 
-const USERS_FILE = path.resolve(
-  process.env.USERS_FILE || path.join(path.dirname(fileURLToPath(import.meta.url)), "..", ".data", "users.json"),
-);
+const SESSION_SECRET = process.env.SESSION_SECRET || crypto.randomBytes(32).toString("hex");
+if (!process.env.SESSION_SECRET) console.warn("SESSION_SECRET not set: users will be signed out whenever the server restarts.");
 
 const challenges = new Map(); // id -> { type, email, hash, expires, attempts, sentAt, pending? }
-const sessions = new Map(); // token -> { email, expires }
 const loginFailures = new Map(); // email -> { count, until }
+const signedOut = new Map(); // token signature -> expiry, for sign-out before a token expires
 
 export class AuthError extends Error {
   constructor(status, message) {
     super(message);
     this.status = status;
   }
-}
-
-// ---------- user store ----------
-function loadUsers() {
-  try {
-    return new Map(Object.entries(JSON.parse(fs.readFileSync(USERS_FILE, "utf8"))));
-  } catch (e) {
-    if (e.code !== "ENOENT") console.error(`Could not read ${USERS_FILE}: ${e.message}`);
-    return new Map();
-  }
-}
-const users = loadUsers();
-
-function saveUsers() {
-  fs.mkdirSync(path.dirname(USERS_FILE), { recursive: true });
-  const tmp = `${USERS_FILE}.tmp`;
-  fs.writeFileSync(tmp, JSON.stringify(Object.fromEntries(users), null, 2));
-  fs.renameSync(tmp, USERS_FILE); // atomic replace so a crash can't leave half a file
 }
 
 // ---------- helpers ----------
@@ -77,7 +59,7 @@ function checkPassword(password) {
 }
 
 function requireMail() {
-  if (!mailConfigured()) throw new AuthError(503, "Email OTP isn't set up on the server yet (SMTP_USER / SMTP_PASS missing)");
+  if (!mailConfigured()) throw new AuthError(503, "Email OTP isn't set up on the server yet (email settings missing)");
 }
 
 async function issueChallenge(type, email, extra = {}) {
@@ -96,11 +78,40 @@ async function issueChallenge(type, email, extra = {}) {
   return { challengeId: id, to: maskEmail(email), expiresInSeconds: OTP_TTL_MS / 1000, resendInSeconds: RESEND_MS / 1000 };
 }
 
-function startSession(email) {
-  const token = crypto.randomBytes(32).toString("hex");
-  sessions.set(token, { email, expires: Date.now() + SESSION_TTL_MS });
-  const user = users.get(email);
-  return { token, user: { email, businessName: user.businessName } };
+// Store errors (e.g. database unreachable) become a clear 503 instead of a generic 500.
+async function fromStore(fn) {
+  try {
+    return await fn();
+  } catch (e) {
+    if (e instanceof DuplicateUserError || e instanceof AuthError) throw e;
+    console.error("User store error:", e.message);
+    throw new AuthError(503, "Account service is temporarily unavailable. Please try again in a minute.");
+  }
+}
+
+// ---------- signed session tokens ----------
+const b64 = (buf) => Buffer.from(buf).toString("base64url");
+const sign = (payload) => crypto.createHmac("sha256", SESSION_SECRET).update(payload).digest();
+
+function startSession(user) {
+  const payload = b64(JSON.stringify({ e: user.email, n: user.businessName, x: Date.now() + SESSION_TTL_MS }));
+  return { token: `${payload}.${b64(sign(payload))}`, user: { email: user.email, businessName: user.businessName } };
+}
+
+function readToken(req) {
+  const m = String(req.headers.authorization || "").match(/^Bearer ([\w-]+)\.([\w-]+)$/);
+  if (!m) return null;
+  const [, payload, sig] = m;
+  const expected = sign(payload);
+  const given = Buffer.from(sig, "base64url");
+  if (given.length !== expected.length || !crypto.timingSafeEqual(given, expected)) return null;
+  try {
+    const data = JSON.parse(Buffer.from(payload, "base64url").toString("utf8"));
+    if (typeof data.e !== "string" || !(data.x > Date.now())) return null;
+    return { sig, email: data.e, businessName: data.n, expires: data.x };
+  } catch {
+    return null;
+  }
 }
 
 // Checks a code; returns the challenge and removes it when correct.
@@ -133,17 +144,21 @@ export async function register({ businessName, email, password, confirmPassword 
   const weak = checkPassword(password);
   if (weak) throw new AuthError(400, weak);
   if (password !== confirmPassword) throw new AuthError(400, "Passwords don't match");
-  if (users.has(mail)) throw new AuthError(409, "An account with this email already exists - sign in instead");
+  if (await fromStore(() => userStore.get(mail))) throw new AuthError(409, "An account with this email already exists - sign in instead");
   // The account is only created after the email is confirmed.
   return issueChallenge("register", mail, { pending: { businessName: name, ...hashPassword(password) } });
 }
 
-export function verifyRegistration(challengeId, otp) {
+export async function verifyRegistration(challengeId, otp) {
   const c = consumeChallenge(challengeId, otp, "register");
-  if (users.has(c.email)) throw new AuthError(409, "An account with this email already exists - sign in instead");
-  users.set(c.email, { businessName: c.pending.businessName, salt: c.pending.salt, hash: c.pending.hash, createdAt: new Date().toISOString() });
-  saveUsers();
-  return startSession(c.email);
+  const record = { businessName: c.pending.businessName, salt: c.pending.salt, hash: c.pending.hash, createdAt: new Date().toISOString() };
+  try {
+    await fromStore(() => userStore.create(c.email, record));
+  } catch (e) {
+    if (e instanceof DuplicateUserError) throw new AuthError(409, "An account with this email already exists - sign in instead");
+    throw e;
+  }
+  return startSession({ email: c.email, ...record });
 }
 
 // ---------- sign in ----------
@@ -153,7 +168,7 @@ export async function login({ email, password }) {
   if (fail && fail.until > Date.now()) {
     throw new AuthError(429, `Too many wrong passwords. Try again in ${Math.ceil((fail.until - Date.now()) / 60000)} minutes.`);
   }
-  const user = users.get(mail);
+  const user = await fromStore(() => userStore.get(mail));
   // Same message whether the email or the password is wrong.
   if (!user || typeof password !== "string" || !passwordMatches(password, user)) {
     const lockEnded = fail?.until && fail.until <= Date.now();
@@ -165,10 +180,11 @@ export async function login({ email, password }) {
   return issueChallenge("login", mail);
 }
 
-export function verifyLogin(challengeId, otp) {
+export async function verifyLogin(challengeId, otp) {
   const c = consumeChallenge(challengeId, otp, "login");
-  if (!users.has(c.email)) throw new AuthError(404, "Account not found");
-  return startSession(c.email);
+  const user = await fromStore(() => userStore.get(c.email));
+  if (!user) throw new AuthError(404, "Account not found");
+  return startSession(user);
 }
 
 // ---------- shared ----------
@@ -184,18 +200,16 @@ export async function resend(challengeId) {
 
 // Returns { email, businessName } for a signed-in request, or null.
 export function userFromRequest(req) {
-  const m = String(req.headers.authorization || "").match(/^Bearer ([a-f0-9]{64})$/);
-  if (!m) return null;
-  const s = sessions.get(m[1]);
-  if (!s) return null;
-  if (Date.now() > s.expires || !users.has(s.email)) {
-    sessions.delete(m[1]);
-    return null;
-  }
-  return { email: s.email, businessName: users.get(s.email).businessName };
+  const t = readToken(req);
+  if (!t || signedOut.has(t.sig)) return null;
+  return { email: t.email, businessName: t.businessName };
 }
 
 export function logout(req) {
-  const m = String(req.headers.authorization || "").match(/^Bearer ([a-f0-9]{64})$/);
-  if (m) sessions.delete(m[1]);
+  const t = readToken(req);
+  if (!t) return;
+  signedOut.set(t.sig, t.expires);
+  for (const [sig, exp] of signedOut) if (exp < Date.now()) signedOut.delete(sig);
 }
+
+export const accountStorage = () => userStore.kind;

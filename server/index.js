@@ -13,7 +13,7 @@ import { recognize } from "./ocr.js";
 import { createOrder, advanceOrder, orderView, orders } from "./orders.js";
 import { summary, winBackLeads } from "./analytics.js";
 import { maskGstin, maskName, TODAY } from "./validators.js";
-import { AuthError, register, verifyRegistration, login, verifyLogin, resend, userFromRequest, logout, maskEmail } from "./auth.js";
+import { AuthError, register, verifyRegistration, login, verifyLogin, resend, userFromRequest, logout, maskEmail, accountStorage } from "./auth.js";
 import { mailConfigured, sendOtpEmail } from "./mailer.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -341,7 +341,7 @@ const server = http.createServer(async (req, res) => {
 });
 
 server.listen(PORT, () => {
-  console.log(`Udyam Digital API on http://localhost:${PORT} | advisor: ${advisorMode()} | today: ${TODAY}`);
+  console.log(`Udyam Digital API on http://localhost:${PORT} | advisor: ${advisorMode()} | accounts: ${accountStorage()} | today: ${TODAY}`);
   // Warm up the propensity model so the first back-office load is fast.
   summary();
 });
